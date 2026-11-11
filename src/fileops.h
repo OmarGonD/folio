@@ -290,6 +290,8 @@ signals:
     // An item renamed from `from` to `to`, by Rename or by undoing or
     // redoing one, for the sidebar's pins and hidden folders to follow.
     void renamed(const QString &from, const QString &to);
+    // A new folder was made in `folder`, named `name`, for naming right away.
+    void folderCreated(const QString &folder, const QString &name);
 
 private:
     void setBusy(const QString &busy);

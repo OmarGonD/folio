@@ -1667,6 +1667,7 @@ void FileOps::newFolder(const QString &folder) {
     }
     remember({MakingFolder, name, 1, {identified({true, QDir(folder).filePath(name), {}})}});
     emit done(folder, name);
+    emit folderCreated(folder, name);
 }
 
 // Undo and redo.
