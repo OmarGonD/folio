@@ -3320,6 +3320,18 @@ private slots:
         QCOMPARE(backend.takeSelection(), QString("report.pdf"));
     }
 
+    void backendShowItemIsCallableFromQml()
+    {
+        // QML reaches the backend through the meta-object system, so a call
+        // from C++ proves nothing about it.
+        QTemporaryDir home;
+        write(home.filePath("report.pdf"), "x");
+        Backend backend(home.path());
+        QVERIFY(QMetaObject::invokeMethod(&backend, "showItem", Q_ARG(QString, home.filePath("report.pdf"))));
+        QCOMPARE(backend.path(), home.path());
+        QCOMPARE(backend.takeSelection(), QString("report.pdf"));
+    }
+
     void backendReadsDetailsOffTheUiThread()
     {
         // A picture's size and a text's opening lines are read in the
