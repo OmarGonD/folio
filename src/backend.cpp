@@ -201,6 +201,10 @@ void Backend::open(const QString &path) {
         navigate(path);
         return;
     }
+    if (m_choosing) {
+        emit chosen(path);
+        return;
+    }
     // The desktop's default app for the type, or for the nearest type it
     // belongs to.
     if (const QString problem = FileOps::openInDefaultApp(path); !problem.isEmpty())
@@ -392,7 +396,7 @@ void Backend::describe(const QVariantMap &item, bool inTrash) {
     });
     // Stepping through files faster than they're read queues readings; the
     // ones overtaken before they start are skipped rather than left to tie
-    // up the threads the next folder is listed on.
+    // up the global pool the folder counts and previews share.
     watcher->setFuture(QtConcurrent::run([path, kind, inTrash, latest = m_describing, generation] {
         QVariantMap read;
         if (*latest != generation)
@@ -552,6 +556,8 @@ QString Backend::completePath(const QString &text) const {
 }
 
 void Backend::newWindow() {
+    if (m_choosing)
+        return;
     emit newWindowRequested(FolderModel::isView(path()) ? m_home : path());
 }
 

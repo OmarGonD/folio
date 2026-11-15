@@ -6,6 +6,7 @@
 #include <QFileSystemWatcher>
 #include <QLocale>
 #include <QStringList>
+#include <QThreadPool>
 #include <QTimer>
 #include <QVariantList>
 #include <QSet>
@@ -32,6 +33,8 @@ class FolderModel : public QAbstractListModel {
     Q_PROPERTY(QString query READ query WRITE setQuery NOTIFY queryChanged)
     // The items a plugin's view lists, as Plugins::views gives them.
     Q_PROPERTY(QVariantList items READ items WRITE setItems NOTIFY itemsChanged)
+    // A file chooser's filter: only files that fit it are listed (see fits()).
+    Q_PROPERTY(QStringList filter READ filter WRITE setFilter NOTIFY filterChanged)
 
 public:
     enum Role {
@@ -85,6 +88,8 @@ public:
     void setQuery(const QString &query);
     QVariantList items() const { return m_items; }
     void setItems(const QVariantList &items);
+    QStringList filter() const { return m_filter; }
+    void setFilter(const QStringList &filter);
 
     void setPath(const QString &path);
     Q_INVOKABLE void reload();
@@ -111,6 +116,9 @@ public:
     // by `locale`'s alphabet; a background pass passes the one it was
     // started with, because the default locale may only be read on the
     // thread that sets it.
+    // The pool folder listings run on (also reachable so tests can constrain it).
+    static QThreadPool &listingPool();
+
     static QVector<Entry> list(const QString &path, bool showHidden, const QString &sort, QString *error,
                                const std::function<bool()> &stop = {}, const QLocale &locale = QLocale());
     static Entry entryFor(const QFileInfo &info, const QMimeDatabase &mimes);
@@ -136,12 +144,17 @@ public:
     // Recents and plugins' views: lists of their own, not folders.
     static bool isView(const QString &path) { return path == recentPath() || isPluginView(path); }
     static QString kindForMime(const QString &mime);
+    // Whether an entry fits a filter: folders always do, and a file when any
+    // pattern matches, a MIME type ("image/png", "image/*", or a type it
+    // inherits) when the pattern has a slash, else a glob for its name,
+    // ignoring case. An empty filter fits everything.
+    static bool fits(const QStringList &filter, const Entry &entry);
     // Everything under `root` whose name contains `query` (ignoring case),
     // named by its path from `root`. Stops at `limit` matches, at other
     // filesystems and at symlinks, and as soon as `stop` returns true.
     static QVector<Entry> search(const QString &root, const QString &query, bool showHidden, const QString &sort,
                                  const std::function<bool()> &stop = {}, int limit = 1000,
-                                 const QLocale &locale = QLocale());
+                                 const QLocale &locale = QLocale(), const QStringList &filter = {});
 
 signals:
     void pathChanged();
@@ -152,6 +165,7 @@ signals:
     void sortModeChanged();
     void queryChanged();
     void itemsChanged();
+    void filterChanged();
     void selectionChanged();
     void loaded();
 
@@ -175,6 +189,7 @@ private:
     QString m_sort = "name";
     QString m_query;
     QVariantList m_items;
+    QStringList m_filter;
     quint64 m_generation = 0;
     // The newest listing's generation, shared with the background listing,
     // search and folder counts, so work that's been overtaken (more typing,
