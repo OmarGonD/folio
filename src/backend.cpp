@@ -396,7 +396,7 @@ void Backend::describe(const QVariantMap &item, bool inTrash) {
     });
     // Stepping through files faster than they're read queues readings; the
     // ones overtaken before they start are skipped rather than left to tie
-    // up the global pool the folder counts and previews share.
+    // up the global pool's threads.
     watcher->setFuture(QtConcurrent::run([path, kind, inTrash, latest = m_describing, generation] {
         QVariantMap read;
         if (*latest != generation)

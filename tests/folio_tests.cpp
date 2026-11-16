@@ -745,11 +745,8 @@ private slots:
 
     void folderModelStopsReadingWhatsBeenOvertaken()
     {
-        // A big folder left before it's been read, or a search of it, stops
-        // being read instead of holding on to a thread of the listing pool
-        // that the next listing waits for. With a listing pool of one
-        // thread, the next folder waits for the overtaken
-        // read to stop, so it shows in a fraction of the time the read takes.
+        // With one listing thread, the next folder shows in a fraction of the
+        // time a big read takes only if the overtaken read stops.
         QTemporaryDir big, small, other;
         for (int i = 0; i < 20000; ++i)
             write(big.filePath(QString("%1.txt").arg(i)), "x");

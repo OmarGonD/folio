@@ -2,6 +2,7 @@
 
 #include <QCache>
 #include <QCollator>
+#include <QCoreApplication>
 #include <QDir>
 #include <QDirIterator>
 #include <QXmlStreamReader>
@@ -40,20 +41,12 @@ FolderModel::~FolderModel() {
     *m_latest = 0;
 }
 
-// Folder listings run on a pool of their own, apart from the folder counts
-// and previews on the global one: slow or huge subfolders being counted can't
-// then hold up the listing of the folder just opened.
-//
-// Like Places::refreshDevices(), the pool is never deleted or waited on, so a
-// listing hung on a dead mount can't hold up a quit. The trade: on exit a
-// listing still running isn't waited for, as it would be on the global pool,
-// and one that wakes during teardown can reach function-local statics (the
-// QMimeDatabase in kindForMime()) already destroyed.
+// Never deleted, like Places', so a listing hung on a dead mount can't stop
+// Folio quitting; one just finishing gets a second before statics go.
 QThreadPool &FolderModel::listingPool() {
     static QThreadPool *const pool = [] {
-        auto *p = new QThreadPool;
-        p->setMaxThreadCount(8);
-        return p;
+        qAddPostRoutine([] { listingPool().waitForDone(1000); });
+        return new QThreadPool;
     }();
     return *pool;
 }
