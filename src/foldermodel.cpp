@@ -41,8 +41,8 @@ FolderModel::~FolderModel() {
     *m_latest = 0;
 }
 
-// Never deleted, like Places', so a listing hung on a dead mount can't stop
-// Folio quitting; one just finishing gets a second before statics go.
+// Never deleted, like Places', so a dead mount can't stop Folio quitting: a listing
+// gets a second to finish, and one stuck longer may still meet destroyed statics.
 QThreadPool &FolderModel::listingPool() {
     static QThreadPool *const pool = [] {
         qAddPostRoutine([] { listingPool().waitForDone(1000); });

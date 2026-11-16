@@ -3324,6 +3324,7 @@ private slots:
         write(dir.filePath("a.txt"), "x");
         QThreadPool *pool = QThreadPool::globalInstance();
         pool->waitForDone();
+        FolderModel::listingPool().waitForDone();
         std::atomic<bool> hold = true;
         const auto stuck = [&] {
             while (hold)
