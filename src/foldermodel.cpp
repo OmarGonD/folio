@@ -46,7 +46,10 @@ FolderModel::~FolderModel() {
 QThreadPool &FolderModel::listingPool() {
     static QThreadPool *const pool = [] {
         qAddPostRoutine([] { listingPool().waitForDone(1000); });
-        return new QThreadPool;
+        auto *p = new QThreadPool;
+        // Eight, not the CPU count, so a few folders stuck on dead mounts leave others listing.
+        p->setMaxThreadCount(8);
+        return p;
     }();
     return *pool;
 }

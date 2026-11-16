@@ -3317,20 +3317,27 @@ private slots:
         QCOMPARE(backend.takeSelection(), QString("report.pdf"));
     }
 
-    void folderModelListsWhileTheGlobalPoolIsHeld()
+    void folderModelListsWhileOtherWorkIsStuck()
     {
+        // Every thread of the global pool busy, and seven listings hung on dead mounts.
         QTemporaryDir dir;
         write(dir.filePath("a.txt"), "x");
         QThreadPool *pool = QThreadPool::globalInstance();
         pool->waitForDone();
-        const int threads = pool->maxThreadCount();
         std::atomic<bool> hold = true;
-        for (int i = 0; i < threads; ++i)
-            pool->start([&] {
-                while (hold)
-                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
-            });
-        const auto release = qScopeGuard([&] { hold = false; pool->waitForDone(); });
+        const auto stuck = [&] {
+            while (hold)
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        };
+        for (int i = 0; i < pool->maxThreadCount(); ++i)
+            pool->start(stuck);
+        for (int i = 0; i < 7; ++i)
+            FolderModel::listingPool().start(stuck);
+        const auto release = qScopeGuard([&] {
+            hold = false;
+            pool->waitForDone();
+            FolderModel::listingPool().waitForDone();
+        });
         FolderModel model;
         QSignalSpy loaded(&model, &FolderModel::loaded);
         model.setPath(dir.path());
