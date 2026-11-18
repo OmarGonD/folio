@@ -18,16 +18,23 @@ Item {
     required property var size
     required property var modified
     required property int itemCount
+    required property string icon
     required property bool selected
+    required property int depth
+    required property bool expanded
 
     property bool current: false
     // In a column to the left: the folder the next column is showing.
     property bool trail: false
     property bool detailed: false
     property bool chevron: false
+    // In the list, a tree: each level indented, and a folder's arrow opens
+    // it in place (or closes it).
+    property bool tree: false
 
     signal clicked(int modifiers)
     signal activated()
+    signal toggled()
 
     implicitHeight: 32
 
@@ -38,7 +45,7 @@ Item {
     readonly property bool showSize: detailed && width >= 380
 
     readonly property string glyph: row.isDir ? "folder"
-                                  : row.kind === "peer" ? "peer"
+                                  : row.kind === "item" ? row.icon
                                   : row.kind === "image" ? "pictures"
                                   : row.kind === "video" ? "videos"
                                   : row.kind === "audio" ? "music"
@@ -70,9 +77,33 @@ Item {
 
     RowLayout {
         anchors.fill: parent
-        anchors.leftMargin: 14
+        anchors.leftMargin: row.tree ? 4 + row.depth * 20 : 14
         anchors.rightMargin: 14
         spacing: 12
+
+        // The folder's arrow: pointing on (with the reading direction)
+        // while it's closed, down while it's open.
+        Item {
+            visible: row.tree
+            Layout.rightMargin: -8
+            implicitWidth: 18
+            implicitHeight: 32
+            Glyph {
+                visible: row.isDir
+                anchors.centerIn: parent
+                name: row.LayoutMirroring.enabled ? "back" : "forward"
+                size: 12
+                rotation: row.expanded ? (row.LayoutMirroring.enabled ? -90 : 90) : 0
+                color: arrowHover.hovered ? theme.foreground : theme.secondaryForeground
+            }
+            HoverHandler { id: arrowHover; enabled: row.isDir }
+            TapHandler {
+                enabled: row.isDir
+                // Before the row's own tap, which would select it instead.
+                grabPermissions: PointerHandler.CanTakeOverFromAnything
+                onTapped: row.toggled()
+            }
+        }
 
         Item {
             implicitWidth: 20
@@ -88,8 +119,12 @@ Item {
                     maskSpreadAtMin: 1
                 }
                 asynchronous: true
-                fillMode: Image.PreserveAspectCrop
-                source: row.kind === "image" || row.kind === "video" ? Format.thumb(row.path, row.mime, 128, row.modified) : ""
+                // Pictures fill the square; a page (a PDF's) shows whole.
+                fillMode: row.kind === "image" || row.kind === "video" ? Image.PreserveAspectCrop : Image.PreserveAspectFit
+                // A small picture of any file there's one of, as the tiles
+                // have; a text's opening lines would be unreadable this
+                // small, and folders and plugins' items keep their glyph.
+                source: row.isDir || row.kind === "item" || row.kind === "text" ? "" : Format.thumb(row.path, row.mime, 128, row.modified)
                 visible: status === Image.Ready
             }
             Rectangle {
@@ -111,7 +146,7 @@ Item {
         // The name and the date are aligned explicitly, so that they're
         // mirrored: left as they are, they'd follow their own script, and a
         // Latin name would sit at the far end of a right-to-left row.
-        Text {
+        FolioText {
             Layout.fillWidth: true
             Layout.minimumWidth: 120
             horizontalAlignment: Text.AlignLeft
@@ -119,17 +154,20 @@ Item {
             color: row.current ? theme.accent : theme.foreground
             elide: Text.ElideMiddle
         }
-        Text {
+        // The size and date columns grow with the text, so the system's text
+        // size doesn't push them into the name.
+        FolioText {
             visible: row.showSize
-            Layout.preferredWidth: 96
+            Layout.preferredWidth: Math.round(96 * theme.textScale)
             horizontalAlignment: Text.AlignRight
-            text: row.kind === "peer" ? row.extension : row.isDir ? Format.count(row.itemCount) : Format.size(row.size)
+            text: row.kind === "item" ? row.extension : row.isDir ? Format.count(row.itemCount) : Format.size(row.size)
             color: theme.secondaryForeground
-            font.pixelSize: 12
+            size: 12
+            elide: Text.ElideRight
         }
-        Text {
+        FolioText {
             visible: row.showDate
-            Layout.preferredWidth: 96
+            Layout.preferredWidth: Math.round(96 * theme.textScale)
             Layout.leftMargin: 12
             horizontalAlignment: Text.AlignLeft
             text: {
@@ -137,7 +175,7 @@ Item {
                 return Format.when(row.modified)
             }
             color: theme.secondaryForeground
-            font.pixelSize: 12
+            size: 12
             elide: Text.ElideRight
         }
         // Points to where the next column opens.
@@ -151,7 +189,9 @@ Item {
 
     HoverHandler {
         id: hover
-        onHoveredChanged: if (hovered) row.grabToImage(result => row.Drag.imageSource = result.url)
+        // Cleared first: Qt (6.12) reloads a new picture at the size of the
+        // one before, which for a grab only warns ("Ignoring sourceSize").
+        onHoveredChanged: if (hovered) row.grabToImage(result => { row.Drag.imageSource = ""; row.Drag.imageSource = result.url })
     }
     TapHandler {
         id: tap
@@ -167,7 +207,7 @@ Item {
     Drag.hotSpot.x: LayoutMirroring.enabled ? row.width : 0
     DragHandler {
         target: null
-        enabled: row.kind !== "peer"
+        enabled: row.kind !== "item"
         // Dragging a selected item takes the whole selection along. The list
         // is built as the drag starts, not again on every change of selection.
         onActiveChanged: {

@@ -3,7 +3,7 @@ import QtQuick.Controls
 import Folio
 
 // Columns, as in the macOS Finder: the folders on the way here from the
-// root (~, a tailnet machine, or /), the current folder, and what's inside
+// root (~, another machine, or /), the current folder, and what's inside
 // the selected subfolder. → goes into the selected folder, ← back out;
 // clicking anywhere to the left jumps there.
 Item {
@@ -11,13 +11,18 @@ Item {
 
     property alias currentIndex: here.currentIndex
     readonly property int columnWidth: 260
+    // The pane whose selected file the details column describes.
+    property var detailsPane: null
+    readonly property var details: detailsColumn.item
 
     function select(row, keep) { selecting.select(row, keep) }
     signal cursorLetGo()
     function letGo() { selecting.letGo(); cursorLetGo() }
 
-    Selecting { id: selecting; view: here }
+    Selecting { id: selecting; view: here; pageStep: Math.max(1, Math.floor(here.height / 32) - 1) }
     function focusView() { here.forceActiveFocus() }
+    // The preview's ↑ and ↓: the row above or below in the current column.
+    function stepRow(direction) { direction < 0 ? here.decrementCurrentIndex() : here.incrementCurrentIndex() }
     function menuAnchor() { return here.currentItem }
 
     // Every column has a menu: on an item there, or on the column's folder.
@@ -30,6 +35,22 @@ Item {
     // column, and the rest stay as they are instead of reloading (which
     // flashed).
     ListModel { id: trail }
+    // How many of the folders on the way here are scrolled out of sight to
+    // the left: a place picked in the sidebar is the first column shown,
+    // with the folders above it there to scroll back to. Going up past it
+    // shows what's above again.
+    property int hidden: 0
+    property string startingAt: ""
+    function startAt(path) {
+        startingAt = path
+        if (backend.path === path)
+            started()
+    }
+    function started() {
+        startingAt = ""
+        hidden = trail.count
+        revealEnd()
+    }
     function syncTrail() {
         const want = []
         for (let i = 0; i + 1 < crumbs.length; ++i)
@@ -37,6 +58,9 @@ Item {
         let same = 0
         while (same < trail.count && same < want.length && trail.get(same).path === want[same].path)
             ++same
+        // Somewhere else altogether (another drive, /) starts from its top.
+        if (same === 0)
+            hidden = 0
         // Columns that stay may now point at a different next folder.
         for (let i = 0; i < same; ++i)
             if (trail.get(i).next !== want[i].next)
@@ -45,25 +69,44 @@ Item {
             trail.remove(same, trail.count - same)
         for (let i = same; i < want.length; ++i)
             trail.append(want[i])
+        hidden = Math.min(hidden, trail.count)
+        if (startingAt.length > 0 && backend.path === startingAt)
+            started()
     }
     onCrumbsChanged: syncTrail()
     Component.onCompleted: syncTrail()
     readonly property var selected: here.currentIndex >= 0 ? (backend.folder.count, backend.folder.get(here.currentIndex)) : ({})
 
-    // Keeps the newest columns in view as the trail grows: on the left,
-    // when mirrored.
-    function revealEnd() { flick.contentX = view.LayoutMirroring.enabled ? 0 : Math.max(0, flick.contentWidth - flick.width) }
+    // Where the first column shown starts, from the side the columns grow
+    // from: past the hidden ones and their separators.
+    readonly property int hiddenWidth: hidden * (columnWidth + 1)
+    // Keeps the newest columns in view as the trail grows, and the hidden
+    // ones out of it: on the left, when mirrored.
+    function revealEnd() {
+        const from = Math.max(view.hiddenWidth, row.width - flick.width)
+        const most = Math.max(0, flick.contentWidth - flick.width)
+        flick.contentX = view.LayoutMirroring.enabled ? most - from : from
+    }
     LayoutMirroring.onEnabledChanged: revealEnd()
-    function enter() { if (view.selected.isDir) backend.navigate(view.selected.path) }
+    function enter() {
+        if (view.selected.isDir && (insideFolder.loading || insideFolder.count > 0 || insideFolder.error.length > 0))
+            backend.navigate(view.selected.path)
+    }
 
     component Separator: Rectangle { width: 1; height: parent ? parent.height : 0; color: Qt.alpha(theme.foreground, 0.1) }
+    // Files dropped in a column land in the folder it shows. It lies over
+    // the whole column, under its items, rather than in the list's content,
+    // which ends at its last item.
+    component ColumnDrop: FolderDrop { parent: items; anchors.fill: parent; z: -1 }
 
     Flickable {
         id: flick
         anchors.fill: parent
         clip: true
         acceptedButtons: Qt.NoButton
-        contentWidth: Math.max(width, row.width)
+        // Room to scroll the hidden columns out of sight even when the rest
+        // would fit.
+        contentWidth: Math.max(width, row.width, view.hiddenWidth + width)
         contentHeight: height
         boundsBehavior: Flickable.StopAtBounds
         onContentWidthChanged: view.revealEnd()
@@ -86,19 +129,16 @@ Item {
                     required property string next
                     height: row.height
 
-                    ListView {
+                    FileListView {
                         id: column
                         width: view.columnWidth
                         height: parent.height
-                        clip: true
-                        acceptedButtons: Qt.NoButton
-                        boundsBehavior: Flickable.StopAtBounds
-                        ScrollBar.vertical: FolioScrollBar { }
                         model: FolderModel {
                             id: folder
                             path: ancestor.path
                             showHidden: backend.folder.showHidden
-                            sortMode: backend.folder.sortMode
+                            sortMode: { backend.sortsRevision; return backend.sortOf(ancestor.path) }
+                            filter: backend.folder.filter
                             onLoaded: column.revealNext()
                         }
                         // Names sort by the language's alphabet.
@@ -107,10 +147,11 @@ Item {
                             function onChanged() { folder.reload() }
                         }
                         function revealNext() { positionViewAtIndex(Math.max(0, folder.indexOf(ancestor.next)), ListView.Contain) }
+                        ColumnDrop { items: column; folder: ancestor.path }
                         TapHandler {
                             acceptedButtons: Qt.RightButton
                             onTapped: (point) => {
-                                const index = column.indexAt(point.position.x + column.contentX, point.position.y + column.contentY)
+                                const index = column.indexAt(point.position.x, point.position.y)
                                 view.contextMenu(index >= 0 ? folder.get(index) : null, ancestor.path, point.scenePosition)
                             }
                         }
@@ -131,30 +172,27 @@ Item {
             }
 
             // The folder being shown: its selection is the window's.
-            ListView {
+            FileListView {
                 id: here
                 width: view.columnWidth
                 height: row.height
-                clip: true
                 focus: true
                 keyNavigationEnabled: true
                 // No cursor of its own to start with: the pane puts it back
                 // where the last view had it, and one on the first item would
                 // select that instead.
                 currentIndex: -1
-                acceptedButtons: Qt.NoButton
-                boundsBehavior: Flickable.StopAtBounds
                 highlightFollowsCurrentItem: false
                 model: backend.folder
-                ScrollBar.vertical: FolioScrollBar { }
 
                 TapHandler {
                     acceptedButtons: Qt.RightButton
                     onTapped: (point) => view.contextMenu(selecting.menuAt(point), backend.path, point.scenePosition)
                 }
+                ColumnDrop { items: here; folder: backend.path }
 
                 onCurrentIndexChanged: selecting.cursorMoved()
-                Keys.onPressed: (event) => selecting.extendBy(event, event.key === Qt.Key_Up ? -1 : event.key === Qt.Key_Down ? 1 : 0)
+                Keys.onPressed: (event) => selecting.page(event) || selecting.extendBy(event, event.key === Qt.Key_Up ? -1 : event.key === Qt.Key_Down ? 1 : 0)
                 // Into a folder is the way the columns grow: leftward, when
                 // mirrored.
                 Keys.onRightPressed: view.LayoutMirroring.enabled ? backend.goUp() : view.enter()
@@ -169,30 +207,27 @@ Item {
                 }
 
                 // Where the first item would be, lined up with the names.
-                Text {
+                FolioText {
                     x: LayoutMirroring.enabled ? here.width - width - 46 : 46
                     y: 8
-                    visible: here.count === 0 && !backend.folder.loading && backend.folder.error.length === 0
-                    text: backend.folder.query ? qsTr("No matches") : qsTr("No items")
+                    readonly property bool searching: backend.folder.loading && backend.folder.query.length > 0
+                    visible: here.count === 0 && (!backend.folder.loading || searching) && backend.folder.error.length === 0
+                    text: searching ? qsTr("Searching…") : backend.folder.query ? qsTr("No matches") : qsTr("No items")
                     color: theme.secondaryForeground
                 }
             }
             Separator { }
 
             // A look inside the selected folder; clicking in it goes there.
-            ListView {
+            FileListView {
                 id: inside
                 width: view.columnWidth
                 height: row.height
                 visible: view.selected.isDir === true
-                clip: true
-                acceptedButtons: Qt.NoButton
-                boundsBehavior: Flickable.StopAtBounds
-                ScrollBar.vertical: FolioScrollBar { }
                 TapHandler {
                     acceptedButtons: Qt.RightButton
                     onTapped: (point) => {
-                        const index = inside.indexAt(point.position.x + inside.contentX, point.position.y + inside.contentY)
+                        const index = inside.indexAt(point.position.x, point.position.y)
                         view.contextMenu(index >= 0 ? inside.model.get(index) : null, view.selected.path, point.scenePosition)
                     }
                 }
@@ -200,12 +235,14 @@ Item {
                     id: insideFolder
                     path: view.selected.isDir === true ? view.selected.path : ""
                     showHidden: backend.folder.showHidden
-                    sortMode: backend.folder.sortMode
+                    sortMode: { backend.sortsRevision; return backend.sortOf(insideFolder.path) }
+                    filter: backend.folder.filter
                 }
                 Connections {
                     target: translator
                     function onChanged() { insideFolder.reload() }
                 }
+                ColumnDrop { items: inside; folder: view.selected.path ?? "" }
                 delegate: FileRow {
                     width: inside.width
                     chevron: true
@@ -213,12 +250,28 @@ Item {
                     onActivated: backend.open(path)
                 }
 
-                Text {
+                FolioText {
                     x: LayoutMirroring.enabled ? inside.width - width - 46 : 46
                     y: 8
                     visible: inside.count === 0 && !inside.model.loading
                     text: qsTr("No items")
                     color: theme.secondaryForeground
+                }
+            }
+
+            // The selected file's details, where a folder would show what's
+            // inside, filling the rest of the width.
+            Loader {
+                id: detailsColumn
+                active: !!view.detailsPane && view.selected.path !== undefined && view.selected.isDir !== true
+                visible: active
+                sourceComponent: PreviewPane {
+                    // All the room right of the columns in sight, and no
+                    // narrower than it reads well.
+                    width: Math.max(300, flick.width - (trail.count - view.hidden + 1) * (view.columnWidth + 1))
+                    height: row.height
+                    folderPane: view.detailsPane
+                    onFinished: view.focusView()
                 }
             }
         }

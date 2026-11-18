@@ -5,8 +5,8 @@ import "Format.js" as Format
 
 // One item in the grid: a preview on top, its name below. Folders are a
 // quiet card; files show a real thumbnail when one
-// can be made, and a drawn stand-in for their kind when not; tailnet
-// machines are a computer.
+// can be made, and a drawn stand-in for their kind when not; a plugin's
+// items are their icon.
 Item {
     id: tile
 
@@ -19,6 +19,7 @@ Item {
     required property string mime
     required property string extension
     required property int itemCount
+    required property string icon
     required property var size
     required property var modified
     required property bool selected
@@ -60,22 +61,13 @@ Item {
 
             Loader {
                 anchors.fill: parent
-                sourceComponent: tile.isDir ? folderArt : tile.kind === "peer" ? peerArt : fileArt
+                sourceComponent: tile.isDir ? folderArt : tile.kind === "item" ? itemArt : fileArt
             }
 
-            // A folder takes files dropped on it, lighting up while they hover.
-            DropArea {
-                id: folderDrop
-                anchors.fill: parent
-                enabled: tile.isDir
-                keys: ["text/uri-list"]
-                onEntered: (drag) => { drag.accepted = fileOps.canDrop(drag.urls, tile.path) }
-                onDropped: (drop) => { fileOps.dropInto(drop.urls, tile.path); drop.accept(Qt.MoveAction) }
-            }
         }
     }
 
-    Text {
+    FolioText {
         id: label
         anchors.top: artBox.bottom
         anchors.topMargin: 12
@@ -83,7 +75,7 @@ Item {
         width: parent.width - 28
         text: tile.name
         color: tile.current ? theme.accent : theme.foreground
-        font.pixelSize: 12
+        size: 12
         horizontalAlignment: Text.AlignHCenter
         wrapMode: Text.WrapAtWordBoundaryOrAnywhere
         maximumLineCount: 2
@@ -92,16 +84,16 @@ Item {
     }
 
     // Size and when, quietly, under the name: "28.0 KB · 2:14 PM" today,
-    // "28.0 KB · 11/9/26" before; just the item count for a folder, the system
-    // for a machine.
-    Text {
+    // "28.0 KB · 11/9/26" before; just the item count for a folder, the
+    // subtitle for a plugin's item.
+    FolioText {
         anchors.top: label.bottom
         anchors.topMargin: 3
         anchors.horizontalCenter: parent.horizontalCenter
         width: parent.width - 28
         text: {
             translator.language // Re-read when the language (and so the default locale) changes.
-            if (tile.kind === "peer")
+            if (tile.kind === "item")
                 return tile.extension
             const size = tile.isDir ? Format.count(tile.itemCount) : Format.size(tile.size)
             // A folder's own date says little (it changes when anything in
@@ -110,16 +102,30 @@ Item {
             return size && date ? qsTr("%1 · %2").arg(size).arg(date) : size || date
         }
         color: theme.secondaryForeground
-        font.pixelSize: 10
+        size: 10
         horizontalAlignment: Text.AlignHCenter
         elide: Text.ElideRight
+    }
+
+    // A folder takes files dropped anywhere on its tile, picture or name,
+    // lighting up while they hover: the view's own drop area refuses the
+    // whole cell, so the tile has to take all of it.
+    DropArea {
+        id: folderDrop
+        anchors.fill: parent
+        enabled: tile.isDir
+        keys: ["text/uri-list"]
+        onEntered: (drag) => { drag.accepted = fileOps.canDrop(drag.urls, tile.path) }
+        onDropped: (drop) => { fileOps.dropInto(drop.urls, tile.path); drop.accept(Qt.MoveAction) }
     }
 
     HoverHandler {
         id: hover
         // The picture that follows the pointer while dragging; taken ahead
         // of time because a drag can't wait for it.
-        onHoveredChanged: if (hovered) art.grabToImage(result => tile.Drag.imageSource = result.url)
+        // Cleared first: Qt (6.12) reloads a new picture at the size of the
+        // one before, which for a grab only warns ("Ignoring sourceSize").
+        onHoveredChanged: if (hovered) art.grabToImage(result => { tile.Drag.imageSource = ""; tile.Drag.imageSource = result.url })
     }
 
     // Dragging hands the file to whatever it lands on as a URI list: the
@@ -128,10 +134,10 @@ Item {
     Drag.supportedActions: Qt.CopyAction | Qt.LinkAction
     Drag.hotSpot.x: tile.width / 2
     Drag.hotSpot.y: 40
-    // A machine isn't a file to hand anywhere.
+    // A plugin's item isn't a file to hand anywhere.
     DragHandler {
         target: null
-        enabled: tile.kind !== "peer"
+        enabled: tile.kind !== "item"
         // Dragging a selected item takes the whole selection along. The list
         // is built as the drag starts, not again on every change of selection.
         onActiveChanged: {
@@ -266,26 +272,24 @@ Item {
         }
     }
 
-    Component {
-        id: peerArt
+    // Hovered, a plugin's icon brightens: to the theme's bright color, or,
+    // in a theme without one apart from its text's, a touch of the accent.
+    readonly property color hoverColor: Qt.colorEqual(theme.brightForeground, theme.foreground)
+                                        ? Qt.tint(theme.foreground, Qt.alpha(theme.accent, 0.35)) : theme.brightForeground
 
+    Component {
+        id: itemArt
+
+        // A plugin's item is only its icon, so selecting it colors the icon
+        // (and the name) rather than framing it: a frame would box in
+        // empty space.
         Item {
             Glyph {
-                id: computer
                 anchors.centerIn: parent
-                name: "peer"
+                name: tile.icon
                 size: 76
                 stroke: 1.2
-                color: tile.current ? theme.accent : theme.foreground
-            }
-            Rectangle {
-                visible: tile.current || hover.hovered
-                anchors.fill: computer
-                anchors.margins: -3
-                color: "transparent"
-                border.width: tile.current ? 2 : 1
-                border.color: tile.current ? theme.accent : Qt.alpha(theme.foreground, 0.2)
-                radius: tile.iconRadius > 0 ? tile.iconRadius + 3 : 0
+                color: tile.current ? theme.accent : hover.hovered ? tile.hoverColor : theme.foreground
             }
         }
     }
@@ -320,7 +324,7 @@ Item {
                 width: badge.implicitWidth + 8
                 height: badge.implicitHeight + 2
                 color: tile.kindColor
-                Text { id: badge; anchors.centerIn: parent; text: tile.extension.slice(0, 4); font.pixelSize: 9; font.bold: true; color: theme.background }
+                FolioText { id: badge; anchors.centerIn: parent; text: tile.extension.slice(0, 4); size: 9; font.bold: true; color: theme.background }
             }
         }
     }
@@ -351,7 +355,7 @@ Item {
                     }
                 }
             }
-            Text { anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 5; text: tile.extension; font.pixelSize: 9; color: theme.secondaryForeground }
+            FolioText { anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 5; text: tile.extension; size: 9; color: theme.secondaryForeground }
         }
     }
 

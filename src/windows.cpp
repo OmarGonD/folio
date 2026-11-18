@@ -7,22 +7,29 @@
 #include "backend.h"
 #include "fileops.h"
 
-Windows::Windows(QQmlEngine *engine, QObject *parent)
-    : QObject(parent), m_engine(engine), m_component(engine, QUrl("qrc:/Main.qml")),
+Windows::Windows(QQmlEngine *engine, Plugins *plugins, QObject *parent)
+    : QObject(parent), m_engine(engine), m_plugins(plugins), m_component(engine, QUrl("qrc:/Main.qml")),
       m_pane(engine, QUrl("qrc:/FolderPane.qml")) {
     // Main.qml calls windows.openSplit() and windows.closeSplit().
     engine->rootContext()->setContextProperty("windows", this);
+    // Only a file chooser's windows have one.
+    engine->rootContext()->setContextProperty("chooser", static_cast<QObject *>(nullptr));
 }
 
-Windows::Pane Windows::makePane(QQmlComponent &component, QQmlContext *parent) {
+Windows::Pane Windows::makePane(QQmlComponent &component, QQmlContext *parent, QObject *chooser) {
     // A context per pane overrides `backend` and `fileOps`; everything else
     // comes from the contexts above it, shared.
     Pane pane;
     pane.context = new QQmlContext(parent, this);
     pane.backend = new Backend({}, this);
+    pane.backend->setPlugins(m_plugins);
     pane.fileOps = new FileOps(this);
     pane.context->setContextProperty("backend", pane.backend);
     pane.context->setContextProperty("fileOps", pane.fileOps);
+    if (chooser) {
+        pane.context->setContextProperty("chooser", chooser);
+        pane.backend->setChoosing(true);
+    }
     pane.item = component.create(pane.context);
     if (!pane.item) {
         qWarning().noquote() << component.errorString();
@@ -33,8 +40,8 @@ Windows::Pane Windows::makePane(QQmlComponent &component, QQmlContext *parent) {
     return pane;
 }
 
-Backend *Windows::open(const QString &folder, const QString &select) {
-    Pane main = makePane(m_component, m_engine->rootContext());
+Backend *Windows::open(const QString &folder, const QString &select, QObject *chooser) {
+    Pane main = makePane(m_component, m_engine->rootContext(), chooser);
     auto *window = qobject_cast<QQuickWindow *>(main.item);
     if (!window) {
         release(main);
@@ -92,6 +99,7 @@ QObject *Windows::openSplit(QObject *window, const QString &folder) {
         w->split = makePane(m_pane, w->main.context);
         if (!w->split.item)
             return nullptr;
+        w->split.backend->setChoosing(w->main.backend->choosing());
         // Owned here, not by QML's garbage collector, though QML holds it.
         QQmlEngine::setObjectOwnership(w->split.item, QQmlEngine::CppOwnership);
         w->split.backend->navigate(folder);
@@ -105,13 +113,14 @@ void Windows::closeSplit(QObject *window) {
 }
 
 void Windows::release(Pane &pane) {
-    // The pane goes first, then what its QML was bound to.
+    // The pane goes first, then what its QML was bound to. Its file work
+    // goes once it's done, so what that changes can still be undone.
     if (pane.item)
         pane.item->deleteLater();
     if (pane.backend)
         pane.backend->deleteLater();
     if (pane.fileOps)
-        pane.fileOps->deleteLater();
+        pane.fileOps->deleteWhenDone();
     if (pane.context)
         pane.context->deleteLater();
     pane = {};

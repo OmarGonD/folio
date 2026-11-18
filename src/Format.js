@@ -17,15 +17,33 @@ function size(bytes) {
     return units[i].arg(value.toLocaleString(Qt.locale(), "f", i === 0 ? 0 : 1))
 }
 
-// When it changed: the time for today, the date before that. Machines on
-// the tailnet have no date.
+// How much room is left on a drive, as its row in the sidebar says it.
+function free(bytes) {
+    return qsTr("%1 free").arg(size(bytes))
+}
+
+// When it changed: the time for today, the date before that. A plugin's
+// items have no date.
 function when(date) {
     if (!date || isNaN(date.getTime()))
         return ""
     const locale = Qt.locale()
     const now = new Date()
     const today = date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate()
-    return today ? date.toLocaleTimeString(locale, QtQml.Locale.ShortFormat) : date.toLocaleDateString(locale, QtQml.Locale.ShortFormat)
+    return spaced(today ? date.toLocaleTimeString(locale, QtQml.Locale.ShortFormat) : date.toLocaleDateString(locale, QtQml.Locale.ShortFormat))
+}
+
+// A date and time in the language's short form, as in the details.
+function stamp(date) {
+    return spaced(date.toLocaleString(Qt.locale(), QtQml.Locale.ShortFormat))
+}
+
+// Dates and times come with no-break spaces ("1:42 PM" with a narrow one)
+// that many monospaced fonts lack: drawn by a fallback font, the space
+// goes missing and the text sits higher than its neighbors. Plain spaces
+// read the same.
+function spaced(text) {
+    return text.replace(/[\u00a0\u202f]/g, " ")
 }
 
 // A folder's contents; nothing until they've been counted.
@@ -34,11 +52,11 @@ function count(n) {
 }
 
 // What an item is and how big, under its name in the details and the
-// preview; for a machine, its system.
+// preview; for a plugin's item, its subtitle.
 function summary(item, type) {
     if (!item || !item.path)
         return ""
-    if (item.kind === "peer")
+    if (item.kind === "item")
         return item.extension
     if (item.isDir)
         return item.itemCount === 0 ? qsTr("Folder · No items") : item.itemCount > 0 ? qsTr("Folder · %Ln items", "", item.itemCount) : qsTr("Folder")
@@ -51,6 +69,17 @@ function summary(item, type) {
 function thumb(path, mime, px, modified) {
     const changed = modified ? modified.getTime() : 0
     return "image://thumb/" + px + "/" + changed + "/" + encodeURIComponent(mime) + "/" + encodeURIComponent(path)
+}
+
+function cachedPreview(path, modified, width, height) {
+    const changed = modified ? modified.getTime() : 0
+    return "image://thumb/cached/" + Math.floor(width) + "/" + Math.floor(height) + "/" + changed + "/" + encodeURIComponent(path)
+}
+
+// A picture as sharp as `px` pixels on its longest side, for the details.
+function sharp(path, mime, px, modified) {
+    const changed = modified ? modified.getTime() : 0
+    return "image://thumb/sharp/" + px + "/" + changed + "/" + encodeURIComponent(mime) + "/" + encodeURIComponent(path)
 }
 
 // A text file's first lines on a page in the theme's colors.

@@ -9,9 +9,10 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 DBus Concurrent Test)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickControls2 DBus Concurrent Test)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GIO REQUIRED IMPORTED_TARGET gio-2.0 gio-unix-2.0)
+pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
 find_package(ZLIB REQUIRED)
 
 # Everything but main.cpp, shared by the app and the tests, so a new source
@@ -21,16 +22,19 @@ list(REMOVE_ITEM folio_sources ${CMAKE_SOURCE_DIR}/src/main.cpp)
 add_library(folio_core STATIC ${folio_sources})
 target_include_directories(folio_core PUBLIC src)
 target_link_libraries(folio_core PUBLIC
-  Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::DBus Qt6::Concurrent
-  PkgConfig::GIO ZLIB::ZLIB)
+  Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::DBus Qt6::Concurrent
+  PkgConfig::GIO PkgConfig::FONTCONFIG ZLIB::ZLIB)
+target_compile_options(folio_core PUBLIC -Wall -Wextra)
 
 add_executable(folio src/main.cpp src/resources.qrc)
 target_link_libraries(folio PRIVATE folio_core)
 
 # The tests compile the same sources, run offscreen, and read the QML they
-# check straight from src/.
-add_executable(folio_tests tests/folio_tests.cpp)
-target_link_libraries(folio_tests PRIVATE folio_core Qt6::Test)
+# check straight from src/, or whole windows from the resources.
 enable_testing()
+add_executable(folio_tests tests/folio_tests.cpp src/resources.qrc)
+target_link_libraries(folio_tests PRIVATE folio_core Qt6::Test)
 add_test(NAME folio_tests COMMAND folio_tests)
 set_tests_properties(folio_tests PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+# The bundled plugins, which the tests run against stubs.
+target_compile_definitions(folio_tests PRIVATE FOLIO_PLUGINS="${CMAKE_SOURCE_DIR}/plugins")
