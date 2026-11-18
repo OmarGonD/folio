@@ -76,6 +76,9 @@ public:
         // How deep in the tree: 0 for the folder's own items, 1 for those of
         // a folder opened in place under them, and so on.
         int depth = 0;
+        // In a search for duplicates ("dupes:"), which set of identical
+        // files this is one of, the biggest set first; 0 otherwise.
+        int group = 0;
     };
 
     explicit FolderModel(QObject *parent = nullptr);

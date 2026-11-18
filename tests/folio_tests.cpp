@@ -1096,6 +1096,36 @@ private slots:
         QCOMPARE(names("my  notes"), QString("my  notes.txt"));
     }
 
+    void folderSearchFindsDuplicates()
+    {
+        QTemporaryDir dir;
+        QDir(dir.path()).mkpath("sub");
+        write(dir.filePath("a.txt"), "same");
+        write(dir.filePath("sub/b.txt"), "same");
+        // Same size, different bytes; and one alone; and empty twins.
+        write(dir.filePath("c.txt"), "diff");
+        write(dir.filePath("only.txt"), "unique file");
+        write(dir.filePath("e1"), "");
+        write(dir.filePath("e2"), "");
+        // Bigger than the 64 KB compared first, differing only at the end.
+        QByteArray big(200 * 1024, 'x');
+        write(dir.filePath("big1"), big);
+        write(dir.filePath("sub/big2"), big);
+        big.back() = 'y';
+        write(dir.filePath("big3"), big);
+        const auto found = FolderModel::search(dir.path(), "dupes:", false, "name");
+        QStringList names;
+        for (const auto &e : found)
+            names << e.name;
+        // The biggest set first, its files together.
+        QCOMPARE(names.join(", "), QString("big1, sub/big2, a.txt, sub/b.txt"));
+        QCOMPARE(found.at(0).group, found.at(1).group);
+        QVERIFY(found.at(1).group != found.at(2).group);
+        // The rest of the query still narrows what's compared.
+        QCOMPARE(FolderModel::search(dir.path(), "dupes: big", false, "name").size(), 2);
+        QVERIFY(FolderModel::search(dir.path(), "dupes: only", false, "name").isEmpty());
+    }
+
     void folderSearchSkipsSymlinkedFolders()
     {
         // A link back up the tree would otherwise be walked round and round.
