@@ -1157,6 +1157,56 @@ private slots:
         QTRY_COMPARE(cursor(), home.filePath("files/file-10.txt"));
     }
 
+    void newFolderInAnEarlierColumnAsksItsName()
+    {
+        // The columns view makes a folder in whichever column was right-
+        // clicked, not only the one the pane is in; it's named all the same.
+        QTemporaryDir home, plugins;
+        QVERIFY(QDir(home.path()).mkdir("inner"));
+        Backend backend(home.filePath("inner"));
+        Theme theme(home.filePath("theme"));
+        Places places(home.path());
+        FileOps fileOps;
+        Plugins bundled("en", {plugins.path()}, home.filePath("folio.conf"));
+        Translator translator(home.filePath("language"), home.path());
+        qmlRegisterType<FolderModel>("Folio", 1, 0, "FolderModel");
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("chooser", static_cast<QObject *>(nullptr));
+        engine.rootContext()->setContextProperty("theme", &theme);
+        engine.rootContext()->setContextProperty("fileOps", &fileOps);
+        engine.rootContext()->setContextProperty("plugins", &bundled);
+        engine.rootContext()->setContextProperty("translator", &translator);
+        engine.rootContext()->setContextProperty("places", &places);
+        QQmlComponent component(&engine);
+        component.setData(R"(
+            import QtQuick
+            import QtQuick.Controls
+            ApplicationWindow {
+                width: 900; height: 620; visible: true
+                property string viewMode: "columns"
+                property real zoom: 1
+                property bool split: false
+                property bool helpVisible: false
+                property var activePane: null
+                function raise() {}
+                function requestActivate() {}
+                FolderPane { id: pane; anchors.fill: parent; focus: true }
+                Component.onCompleted: activePane = pane
+                readonly property var paneItem: pane
+            }
+        )", QUrl::fromLocalFile(sourceFolder() + "/NewFolderNameTest.qml"));
+        std::unique_ptr<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        auto *pane = root->property("paneItem").value<QObject *>();
+        QVERIFY(pane);
+        QVERIFY(!pane->property("asking").toBool());
+
+        fileOps.newFolder(home.path());
+        QVERIFY(QFileInfo(home.filePath("Untitled Folder")).isDir());
+        QTRY_VERIFY(pane->property("asking").toBool());
+    }
+
     void folderModelSwapsFoldersWithoutAnEmptyFrame()
     {
         QTemporaryDir a, b;
